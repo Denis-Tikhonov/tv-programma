@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0d1117">
+  <meta name="description" content="Локальная телепрограмма. Загружайте EPG и смотрите расписание офлайн.">
+  <title>ТВ программа</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="css/styles.css">
+  <!-- Apple touch icon fallback (optional, no custom icons) -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="ТВ программа">
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="header">
+      <h1 class="logo">ТВ программа</h1>
+      <div class="header-actions">
+        <button id="btn-sources" class="icon-btn" title="Источники" aria-label="Источники">☰</button>
+        <button id="btn-search" class="icon-btn" title="Поиск" aria-label="Поиск">🔍</button>
+      </div>
+    </header>
+
+    <!-- Main content area -->
+    <main id="main" class="main">
+      <!-- Screens will be rendered here -->
+    </main>
+
+    <!-- Bottom navigation (optional, for mobile) -->
+    <nav id="bottom-nav" class="bottom-nav hidden">
+      <button data-screen="channels" class="nav-btn active">Каналы</button>
+      <button data-screen="favorites" class="nav-btn">Избранное</button>
+      <button data-screen="search" class="nav-btn">Поиск</button>
+    </nav>
+  </div>
+
+  <!-- Toast notifications -->
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- Loading overlay -->
+  <div id="loading" class="loading hidden">
+    <div class="spinner"></div>
+    <p id="loading-text">Загрузка...</p>
+  </div>
+
+  <script src="js/db.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/epg.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
