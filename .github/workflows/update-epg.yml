@@ -2,8 +2,11 @@ name: Update EPG
 
 on:
   schedule:
-    - cron: '0 6 * * *'   # каждый день в 06:00 UTC
-  workflow_dispatch:       # можно запускать вручную
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   update:
@@ -11,9 +14,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+        uses: actions/checkout@v6
 
       - name: Create epg folder
         run: mkdir -p epg
@@ -34,7 +35,7 @@ jobs:
           git add epg/
           
           if git diff --staged --quiet; then
-            echo "No changes"
+            echo "No changes to commit"
           else
             git commit -m "chore: update EPG $(date -u +%Y-%m-%d)"
             git push
