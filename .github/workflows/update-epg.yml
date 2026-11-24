@@ -1,0 +1,59 @@
+# GitHub Action: автоматически скачивает EPG и кладёт в папку /epg/
+# Запускается каждый день в 06:00 UTC (09:00 по Москве зимой)
+
+name: Update EPG
+
+on:
+  schedule:
+    # Каждый день в 06:00 UTC
+    - cron: '0 6 * * *'
+  # Можно запускать вручную из вкладки Actions
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout репозитория
+        uses: actions/checkout@v4
+
+      - name: Создаём папку epg
+        run: mkdir -p epg
+
+      - name: Скачиваем основной EPG (1lot.tv)
+        run: |
+          echo "Скачиваю 1lot.tv..."
+          curl -L --fail --retry 3 --retry-delay 5 \
+            -o epg/1lot.xml.gz \
+            "https://1lot.tv/epg/epg.xml.gz"
+          ls -lh epg/1lot.xml.gz
+
+      # Здесь позже можно добавить второй источник
+      # - name: Скачиваем резервный EPG
+      #   run: |
+      #     curl -L --fail -o epg/backup.xml.gz "https://example.com/other.xml.gz"
+
+      - name: Проверяем, что файлы скачались
+        run: |
+          if [ ! -f epg/1lot.xml.gz ]; then
+            echo "Ошибка: файл 1lot.xml.gz не скачался"
+            exit 1
+          fi
+          echo "Файлы успешно скачаны:"
+          ls -lh epg/
+
+      - name: Коммитим и пушим обновления
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git add epg/
+          
+          # Проверяем, есть ли изменения
+          if git diff --staged --quiet; then
+            echo "Изменений нет, коммит не нужен"
+          else
+            git commit -m "chore: обновление EPG $(date -u +%Y-%m-%d)"
+            git push
+          fi
