@@ -1,59 +1,41 @@
-# GitHub Action: автоматически скачивает EPG и кладёт в папку /epg/
-# Запускается каждый день в 06:00 UTC (09:00 по Москве зимой)
-
 name: Update EPG
 
 on:
   schedule:
-    # Каждый день в 06:00 UTC
-    - cron: '0 6 * * *'
-  # Можно запускать вручную из вкладки Actions
-  workflow_dispatch:
+    - cron: '0 6 * * *'   # каждый день в 06:00 UTC
+  workflow_dispatch:       # можно запускать вручную
 
 jobs:
   update:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout репозитория
+      - name: Checkout
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Создаём папку epg
+      - name: Create epg folder
         run: mkdir -p epg
 
-      - name: Скачиваем основной EPG (1lot.tv)
+      - name: Download 1lot.tv EPG
         run: |
-          echo "Скачиваю 1lot.tv..."
+          echo "Downloading 1lot.tv EPG..."
           curl -L --fail --retry 3 --retry-delay 5 \
             -o epg/1lot.xml.gz \
             "https://1lot.tv/epg/epg.xml.gz"
           ls -lh epg/1lot.xml.gz
 
-      # Здесь позже можно добавить второй источник
-      # - name: Скачиваем резервный EPG
-      #   run: |
-      #     curl -L --fail -o epg/backup.xml.gz "https://example.com/other.xml.gz"
-
-      - name: Проверяем, что файлы скачались
-        run: |
-          if [ ! -f epg/1lot.xml.gz ]; then
-            echo "Ошибка: файл 1lot.xml.gz не скачался"
-            exit 1
-          fi
-          echo "Файлы успешно скачаны:"
-          ls -lh epg/
-
-      - name: Коммитим и пушим обновления
+      - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
           git add epg/
           
-          # Проверяем, есть ли изменения
           if git diff --staged --quiet; then
-            echo "Изменений нет, коммит не нужен"
+            echo "No changes"
           else
-            git commit -m "chore: обновление EPG $(date -u +%Y-%m-%d)"
+            git commit -m "chore: update EPG $(date -u +%Y-%m-%d)"
             git push
           fi
