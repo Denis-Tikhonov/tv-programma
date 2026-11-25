@@ -1,421 +1,338 @@
-/**
- * Main application logic — ТВ программа
- */
+const APP_VERSION = '1.1.1';
 
-// Предустановленные источники (файлы лежат в /epg/ на GitHub Pages)
 const PRESET_SOURCES = [
   {
     id: 'preset-1lot',
     name: '1lot.tv (основной)',
     url: './epg/1lot.xml.gz',
-    description: 'Популярные российские каналы'
+    isPreset: true
   },
   {
-    id: 'preset-backup',
-    name: 'Резервный источник',
-    url: './epg/backup.xml.gz',
-    description: 'Запасной EPG (будет добавлен позже)'
+    id: 'preset-gabbarit',
+    name: 'gabbarit (максимум каналов)',
+    url: './epg/gabbarit.xml.gz',
+    isPreset: true
   }
 ];
 
 const App = {
-  sources: [],          // custom sources from IndexedDB
   activeSourceId: null,
   channels: [],
-  favorites: [],
-  currentScreen: 'sources',
+  favorites: new Set(),
+  searchHistory: [],
+  urlHistory: [],
 
   async init() {
-    UI.init();
+    document.getElementById('app-version').textContent = 'v' + APP_VERSION;
+    await DB.open();
 
-    // Register Service Worker
-    if ('serviceWorker' in navigator) {
-      try {
-        await navigator.serviceWorker.register('./sw.js');
-      } catch (e) {
-        console.warn('SW registration failed', e);
-      }
-    }
+    this.activeSourceId = await DB.getMeta('activeSourceId');
+    this.searchHistory = (await DB.getMeta('searchHistory')) || [];
+    this.urlHistory = (await DB.getMeta('urlHistory')) || [];
+    this.favorites = await DB.getFavorites();
 
-    await openDB();
-    this.activeSourceId = await getSetting('activeSourceId', null);
-    this.sources = await getAllSources();
+    UI.fillUrlHistory(this.urlHistory);
+    UI.renderSearchHistory(this.searchHistory);
 
-    // Event listeners
-    document.getElementById('btn-sources').addEventListener('click', () => this.showSources());
-    document.getElementById('btn-search').addEventListener('click', () => this.showSearch());
-
-    // Start screen
     if (this.activeSourceId) {
-      const all = this.getAllSourcesList();
-      const src = all.find(s => s.id === this.activeSourceId);
-      if (src && src.loaded) {
-        await this.loadChannelsAndShow();
-        return;
+      this.channels = await DB.getChannels(this.activeSourceId);
+      if (this.channels.length) {
+        UI.showView('channels');
+        UI.renderChannels(this.channels, this.favorites);
+      } else {
+        UI.showView('home');
       }
-    }
-    this.showSources();
-  },
-
-  /** Объединённый список: пресеты + пользовательские */
-  getAllSourcesList() {
-    const customMap = new Map(this.sources.map(s => [s.id, s]));
-    const list = [];
-
-    // Сначала пресеты (с актуальным статусом loaded из БД, если есть)
-    PRESET_SOURCES.forEach(p => {
-      const saved = customMap.get(p.id);
-      list.push({
-        ...p,
-        isPreset: true,
-        loaded: saved ? saved.loaded : false,
-        meta: saved ? saved.meta : null,
-        period: saved ? saved.period : null
-      });
-    });
-
-    // Потом только пользовательские (не пресеты)
-    this.sources.forEach(s => {
-      if (!s.id.startsWith('preset-')) {
-        list.push({ ...s, isPreset: false });
-      }
-    });
-
-    return list;
-  },
-
-
-  // ---------- Sources ----------
-  showSources() {
-    this.currentScreen = 'sources';
-    const allSources = this.getAllSourcesList();
-    UI.renderSources(allSources, this.activeSourceId);
-
-    const addBtn = document.getElementById('btn-add-source');
-    if (addBtn) {
-      addBtn.addEventListener('click', () => this.onAddSource());
+    } else {
+      UI.showView('home');
     }
 
-    // Select source
-    this.mainEl().querySelectorAll('.btn-select-source').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.setActiveSource(btn.dataset.id);
-      });
-    });
-
-    // Load preset / custom that is not loaded yet
-    this.mainEl().querySelectorAll('.btn-load-source').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.startLoadSource(btn.dataset.id);
-      });
-    });
-
-    // Delete only custom
-    this.mainEl().querySelectorAll('.btn-delete-source').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.deleteSource(btn.dataset.id);
-      });
-    });
+    this.bindEvents();
+    this.renderSourcesList();
   },
 
-  async startLoadSource(id) {
-    const all = this.getAllSourcesList();
-    const src = all.find(s => s.id === id);
-    if (!src) return;
-
-    // For presets we already know the URL, for custom too
-    // Show period selection (reuse analyze UI simplified)
-    this._pendingLoad = src;
-    UI.renderPeriodSelect(src);
-    
-    const loadBtn = document.getElementById('btn-load-epg');
-    if (loadBtn) {
-      loadBtn.addEventListener('click', () => {
-        const periodInput = document.querySelector('input[name="period"]:checked');
-        const period = periodInput ? periodInput.value : '3';
-        this.onLoadEpg(src.url, null, period, src);
-      });
-    }
-  },
-
-
-  mainEl() {
-    return document.getElementById('main');
-  },
-
-  async onAddSource() {
-    const input = document.getElementById('input-url');
-    const url = (input?.value || '').trim();
-    if (!url) {
-      showToast('Введите ссылку на EPG');
-      return;
-    }
-    if (!url.startsWith('http')) {
-      showToast('Ссылка должна начинаться с http:// или https://');
-      return;
-    }
-
-    showLoading('Анализ архива...');
-    try {
-      // HEAD info
-      const headInfo = await fetchEpgInfo(url);
-
-      // Full analyze (download + parse stats)
-      const info = await analyzeEpg(url, (msg) => {
-        document.getElementById('loading-text').textContent = msg;
-      });
-      info.lastModified = headInfo.lastModified;
-      if (headInfo.size) info.sizeCompressed = headInfo.size;
-
-      hideLoading();
-      UI.renderAnalyzeResult(info, url);
-
-      // Bind load button
-      const loadBtn = document.getElementById('btn-load-epg');
-      if (loadBtn) {
-        loadBtn.addEventListener('click', () => this.onLoadEpg(url, info, null, null));
-      }
-    } catch (err) {
-      hideLoading();
-      console.error(err);
-      showToast('Ошибка: ' + (err.message || 'не удалось проанализировать'));
-    }
-  },
-
-
-  async onLoadEpg(url, analyzeInfo, forcedPeriod = null, existingSource = null) {
-    const periodInput = document.querySelector('input[name="period"]:checked');
-    const period = forcedPeriod || (periodInput ? periodInput.value : '3');
-
-    showLoading('Загрузка EPG...');
-    try {
-      const result = await loadEpg(url, period, (msg) => {
-        const el = document.getElementById('loading-text');
-        if (el) el.textContent = msg;
-      });
-
-      // Используем id пресета или создаём новый
-      const sourceId = existingSource ? existingSource.id : uid();
-      const source = {
-        id: sourceId,
-        url,
-        name: existingSource ? existingSource.name : this.guessName(url, analyzeInfo),
-        description: existingSource ? existingSource.description : null,
-        isPreset: existingSource ? !!existingSource.isPreset : false,
-        addedAt: Date.now(),
-        period,
-        loaded: true,
-        meta: {
-          ...(analyzeInfo || {}),
-          channelCount: result.meta.channelCount,
-          programmeCountLoaded: result.meta.programmeCountLoaded,
-          dateFrom: result.meta.dateFrom,
-          dateTo: result.meta.dateTo,
-          generator: result.meta.generator,
-          loadedAt: Date.now()
+  bindEvents() {
+    // Menu
+    document.getElementById('btn-menu').onclick = () => UI.openMenu();
+    document.getElementById('menu-overlay').onclick = () => UI.closeMenu();
+    document.querySelectorAll('#side-menu li[data-view]').forEach(li => {
+      li.onclick = () => {
+        UI.closeMenu();
+        const view = li.dataset.view;
+        if (view === 'channels') {
+          UI.showView('channels');
+          UI.renderChannels(this.channels, this.favorites, UI.channelFilter, UI.favoritesOnly);
+        } else if (view === 'search') {
+          UI.showView('search');
+        } else if (view === 'sources') {
+          UI.showView('sources');
+          this.renderSourcesList();
         }
       };
-
-      // Очищаем старые данные этого источника перед записью новых
-      await clearSourceData(sourceId);
-
-      const channels = result.channels.map(ch => ({
-        ...ch,
-        id: sourceId + '::' + ch.originalId,
-        sourceId
-      }));
-
-      const channelIdMap = new Map();
-      channels.forEach(ch => channelIdMap.set(ch.originalId, ch.id));
-
-      const programmes = result.programmes.map(p => ({
-        ...p,
-        id: sourceId + '::' + p.originalChannelId + '::' + p.start,
-        sourceId,
-        channelId: channelIdMap.get(p.originalChannelId) || (sourceId + '::' + p.originalChannelId)
-      }));
-
-      document.getElementById('loading-text').textContent = 'Сохранение...';
-      await saveSource(source);
-      await saveChannels(channels);
-      await saveProgrammes(programmes);
-
-      this.sources = await getAllSources();
-      await this.setActiveSource(sourceId);
-
-      hideLoading();
-      showToast(`Загружено ${channels.length} каналов, ${programmes.length} передач`);
-      await this.loadChannelsAndShow();
-    } catch (err) {
-      hideLoading();
-      console.error(err);
-      showToast('Ошибка загрузки: ' + (err.message || 'неизвестно'));
-    }
-  },
-
-
-  guessName(url, info) {
-    try {
-      const u = new URL(url);
-      return u.hostname.replace(/^www\./, '');
-    } catch {
-      return info.generator || 'Источник';
-    }
-  },
-
-  async setActiveSource(id) {
-    this.activeSourceId = id;
-    await setSetting('activeSourceId', id);
-    this.sources = await getAllSources();
-    await this.loadChannelsAndShow();
-  },
-
-  async deleteSource(id) {
-    if (!confirm('Удалить этот источник и все его данные?')) return;
-    await deleteSource(id);
-    if (this.activeSourceId === id) {
-      this.activeSourceId = null;
-      await setSetting('activeSourceId', null);
-    }
-    this.sources = await getAllSources();
-    this.showSources();
-    showToast('Источник удалён');
-  },
-
-  // ---------- Channels ----------
-  async loadChannelsAndShow() {
-    if (!this.activeSourceId) {
-      this.showSources();
-      return;
-    }
-    showLoading('Загрузка каналов...');
-    this.channels = await getChannelsBySource(this.activeSourceId);
-    this.favorites = await getFavorites(this.activeSourceId);
-    hideLoading();
-    this.showChannels();
-  },
-
-  showChannels() {
-    this.currentScreen = 'channels';
-    const src = this.sources.find(s => s.id === this.activeSourceId);
-    UI.renderChannels(this.channels, this.favorites, src ? src.name : '');
-
-    // Click on channel
-    this.mainEl().querySelectorAll('.channel-item').forEach(el => {
-      el.addEventListener('click', (e) => {
-        if (e.target.closest('.fav-btn')) return;
-        this.showProgrammes(el.dataset.id);
-      });
     });
+    document.getElementById('menu-favorites').onclick = () => {
+      UI.closeMenu();
+      UI.favoritesOnly = true;
+      UI.showView('channels');
+      UI.renderChannels(this.channels, this.favorites, UI.channelFilter, true);
+    };
 
-    // Favorite toggle
-    this.mainEl().querySelectorAll('.fav-btn').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
+    document.getElementById('btn-go-sources').onclick = () => {
+      UI.showView('sources');
+      this.renderSourcesList();
+    };
+
+    document.getElementById('btn-search').onclick = () => {
+      UI.showView('search');
+      document.getElementById('search-input').focus();
+    };
+
+    // Channels filter
+    document.getElementById('filter-channels').oninput = Utils.debounce((e) => {
+      UI.channelFilter = e.target.value;
+      UI.renderChannels(this.channels, this.favorites, UI.channelFilter, UI.favoritesOnly);
+    }, 200);
+
+    document.getElementById('btn-fav-only').onclick = () => {
+      UI.favoritesOnly = !UI.favoritesOnly;
+      document.getElementById('btn-fav-only').textContent = UI.favoritesOnly ? '★ Все' : '★ Избранные';
+      UI.renderChannels(this.channels, this.favorites, UI.channelFilter, UI.favoritesOnly);
+    };
+
+    // Channel click / fav
+    document.getElementById('channels-list').onclick = async (e) => {
+      const favBtn = e.target.closest('.fav');
+      if (favBtn) {
         e.stopPropagation();
-        const id = btn.dataset.id;
-        const idx = this.favorites.indexOf(id);
-        if (idx >= 0) {
-          this.favorites.splice(idx, 1);
-        } else {
-          this.favorites.push(id);
-        }
-        await setFavorites(this.activeSourceId, this.favorites);
-        this.showChannels(); // re-render
-      });
+        const id = favBtn.dataset.id;
+        const isFav = await DB.toggleFavorite(id);
+        if (isFav) this.favorites.add(id);
+        else this.favorites.delete(id);
+        UI.renderChannels(this.channels, this.favorites, UI.channelFilter, UI.favoritesOnly);
+        return;
+      }
+      const item = e.target.closest('.list-item');
+      if (item) this.openChannel(item.dataset.id);
+    };
+
+    // Source channels list click
+    document.getElementById('source-channels-list').onclick = (e) => {
+      const item = e.target.closest('.list-item');
+      if (item) this.openChannel(item.dataset.id);
+    };
+
+    document.getElementById('btn-back-sources').onclick = () => {
+      UI.showView('sources');
+      this.renderSourcesList();
+    };
+
+    // Sources actions
+    document.getElementById('sources-list').onclick = async (e) => {
+      const card = e.target.closest('.source-card');
+      if (!card) return;
+      const id = card.dataset.id;
+
+      if (e.target.classList.contains('btn-open-channels') || (e.target.closest('.btn-open-channels'))) {
+        await this.openSourceChannels(id);
+        return;
+      }
+      if (e.target.classList.contains('btn-activate')) {
+        await this.activateSource(id);
+        return;
+      }
+      if (e.target.classList.contains('btn-reload')) {
+        await this.loadSource(id);
+        return;
+      }
+    };
+
+    // Add custom source
+    document.getElementById('btn-add-source').onclick = () => this.addCustomSource();
+
+    // Search
+    const searchInput = document.getElementById('search-input');
+    document.getElementById('btn-do-search').onclick = () => this.doSearch();
+    searchInput.onkeydown = (e) => {
+      if (e.key === 'Enter') this.doSearch();
+    };
+    // Prevent focus loss: do not re-render history on every keystroke in a way that steals focus
+    searchInput.oninput = () => {}; // live search disabled to keep focus; use button or Enter
+
+    document.getElementById('search-history').onclick = (e) => {
+      const btn = e.target.closest('button[data-q]');
+      if (btn) {
+        searchInput.value = btn.dataset.q;
+        this.doSearch();
+      }
+    };
+
+    // Search result → open channel
+    document.getElementById('search-results').onclick = (e) => {
+      const card = e.target.closest('.prog-card[data-channel]');
+      if (card) this.openChannel(card.dataset.channel);
+    };
+  },
+
+  async renderSourcesList() {
+    const saved = await DB.getSources();
+    // enrich presets with saved data
+    const presets = PRESET_SOURCES.map(p => {
+      const s = saved.find(x => x.id === p.id);
+      return s ? { ...p, ...s } : { ...p };
     });
+    const customs = saved.filter(s => !s.isPreset);
+    UI.renderSources(presets, customs, this.activeSourceId);
   },
 
-  // ---------- Programmes ----------
-  async showProgrammes(channelId) {
-    const channel = this.channels.find(c => c.id === channelId);
-    if (!channel) return;
-
-    showLoading('Загрузка программы...');
-    // Load a wider window (all loaded data for this channel)
-    const programmes = await getProgrammesByChannel(channelId);
-    hideLoading();
-
-    this.currentScreen = 'programmes';
-    UI.renderProgrammes(channel, programmes);
-
-    const back = document.getElementById('btn-back-channels');
-    if (back) back.addEventListener('click', () => this.showChannels());
+  async openSourceChannels(sourceId) {
+    const source = await DB.getSource(sourceId) || PRESET_SOURCES.find(p => p.id === sourceId);
+    if (!source) return;
+    let channels = await DB.getChannels(sourceId);
+    if (!channels.length && sourceId === this.activeSourceId) {
+      channels = this.channels;
+    }
+    if (!channels.length) {
+      Utils.toast('Сначала загрузите источник');
+      return;
+    }
+    UI.renderSourceChannels(channels, source.name);
+    UI.showView('source-channels');
   },
 
-  // ---------- Search ----------
-  async showSearch() {
-    if (!this.activeSourceId) {
-      showToast('Сначала выберите источник');
-      this.showSources();
+  async activateSource(id) {
+    const source = await DB.getSource(id);
+    if (!source || !source.loadedAt) {
+      Utils.toast('Сначала загрузите источник');
+      return;
+    }
+    this.activeSourceId = id;
+    await DB.setMeta('activeSourceId', id);
+    this.channels = await DB.getChannels(id);
+    UI.showView('channels');
+    UI.renderChannels(this.channels, this.favorites);
+    Utils.toast('Источник выбран');
+    this.renderSourcesList();
+  },
+
+  async loadSource(id) {
+    let source = PRESET_SOURCES.find(p => p.id === id) || await DB.getSource(id);
+    if (!source) {
+      Utils.toast('Источник не найден');
       return;
     }
 
-    this.currentScreen = 'search';
-    this._channelsMap = new Map(this.channels.map(c => [c.id, c]));
-    this._searchQuery = '';
-    this._renderSearchResults([]);
+    const daysEl = document.querySelector('input[name="days"]:checked');
+    const days = daysEl ? parseInt(daysEl.value, 10) : 3;
 
-    // Use event delegation on main for results clicks
-    // Input handling is attached once per showSearch
+    Utils.showLoading('Загрузка EPG...');
+    try {
+      const data = await EPG.loadAndParse(source.url, days, (t) => {
+        document.getElementById('loading-text').textContent = t;
+      });
+
+      await DB.clearSourceData(id);
+      const channels = data.channels.map(c => ({ ...c, sourceId: id }));
+      await DB.putChannels(channels);
+      await DB.putProgrammes(data.programmes);
+
+      const saved = {
+        id,
+        name: source.name,
+        url: source.url,
+        isPreset: !!source.isPreset,
+        loadedAt: Date.now(),
+        channelCount: data.stats.channels,
+        programmeCount: data.stats.programmes,
+        days
+      };
+      await DB.saveSource(saved);
+
+      this.activeSourceId = id;
+      await DB.setMeta('activeSourceId', id);
+      this.channels = channels;
+
+      Utils.hideLoading();
+      Utils.toast(`Загружено: ${data.stats.channels} каналов, ${data.stats.programmes} передач`);
+      UI.showView('channels');
+      UI.renderChannels(this.channels, this.favorites);
+      this.renderSourcesList();
+    } catch (err) {
+      Utils.hideLoading();
+      console.error(err);
+      Utils.toast('Ошибка: ' + (err.message || 'не удалось загрузить'));
+    }
   },
 
-  _renderSearchResults(results) {
-    UI.renderSearch(results, this._channelsMap || new Map());
-
-    const input = document.getElementById('search-input');
-    if (input) {
-      input.value = this._searchQuery || '';
-      input.focus();
-
-      // Remove old listener by cloning (simple way)
-      const newInput = input.cloneNode(true);
-      input.parentNode.replaceChild(newInput, input);
-      newInput.value = this._searchQuery || '';
-
-      let timer = null;
-      newInput.addEventListener('input', () => {
-        clearTimeout(timer);
-        this._searchQuery = newInput.value;
-        timer = setTimeout(async () => {
-          const q = newInput.value.trim();
-          if (q.length < 2) {
-            this._renderSearchResults([]);
-            return;
-          }
-          showLoading('Поиск...');
-          try {
-            const results = await searchProgrammes(this.activeSourceId, q);
-            hideLoading();
-            this._renderSearchResults(results);
-          } catch (e) {
-            hideLoading();
-            showToast('Ошибка поиска');
-          }
-        }, 350);
-      });
+  async addCustomSource() {
+    const input = document.getElementById('custom-url');
+    const url = (input.value || '').trim();
+    if (!url) {
+      Utils.toast('Введите URL');
+      return;
+    }
+    if (!url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('./')) {
+      Utils.toast('URL должен начинаться с http(s)://');
+      return;
     }
 
-    // Result clicks
-    this.mainEl().querySelectorAll('[data-channel-id]').forEach(el => {
-      el.addEventListener('click', () => {
-        this.showProgrammes(el.dataset.channelId);
-      });
-    });
+    // save to history
+    this.urlHistory = [url, ...this.urlHistory.filter(u => u !== url)].slice(0, 8);
+    await DB.setMeta('urlHistory', this.urlHistory);
+    UI.fillUrlHistory(this.urlHistory);
+
+    const id = 'custom-' + btoa(url).replace(/[^a-z0-9]/gi, '').slice(0, 16);
+    const name = url.replace(/^https?:\/\//, '').split('/')[0] || 'Свой источник';
+
+    const source = { id, name, url, isPreset: false };
+    await DB.saveSource(source);
+    await this.loadSource(id);
+    input.value = '';
+  },
+
+  async openChannel(channelId) {
+    const ch = this.channels.find(c => c.id === channelId);
+    const name = ch ? ch.name : channelId;
+    Utils.showLoading('Загрузка программы...');
+    try {
+      const programmes = await DB.getProgrammesByChannel(channelId);
+      Utils.hideLoading();
+      UI.renderProgrammes(programmes, name);
+      UI.showView('programmes');
+    } catch (e) {
+      Utils.hideLoading();
+      Utils.toast('Ошибка загрузки программы');
+    }
+  },
+
+  async doSearch() {
+    const input = document.getElementById('search-input');
+    const q = (input.value || '').trim();
+    if (q.length < 1) {
+      Utils.toast('Введите запрос');
+      return;
+    }
+
+    // history
+    this.searchHistory = [q, ...this.searchHistory.filter(x => x !== q)].slice(0, 10);
+    await DB.setMeta('searchHistory', this.searchHistory);
+    UI.renderSearchHistory(this.searchHistory);
+
+    Utils.showLoading('Поиск...');
+    try {
+      const results = await DB.searchProgrammes(q);
+      Utils.hideLoading();
+      UI.renderSearchResults(results);
+      // keep focus-friendly: no forced blur
+      input.focus();
+    } catch (e) {
+      Utils.hideLoading();
+      Utils.toast('Ошибка поиска');
+    }
   }
 };
 
+document.addEventListener('DOMContentLoaded', () => App.init());
 
-// Делаем App доступным глобально (для кнопки «Отмена»)
-window.App = App;
-
-// Boot
-document.addEventListener('DOMContentLoaded', () => {
-  App.init().catch(err => {
-    console.error(err);
-    showToast('Ошибка инициализации');
-  });
-});
-
+// Service worker
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch(() => {});
+}
