@@ -23,6 +23,7 @@ jobs:
         run: |
           echo "Downloading 1lot.tv EPG..."
           curl -L --fail --retry 3 --retry-delay 5 \
+            -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
             -o epg/1lot.xml.gz \
             "https://1lot.tv/epg/epg.xml.gz"
           ls -lh epg/1lot.xml.gz
@@ -31,8 +32,11 @@ jobs:
         run: |
           echo "Downloading gabbarit EPG..."
           curl -L --fail --retry 3 --retry-delay 5 \
+            -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+            -H "Accept: application/octet-stream,*/*" \
+            -H "Accept-Language: ru-RU,ru;q=0.9,en;q=0.8" \
             -o epg/gabbarit.xml.gz \
-            "http://gabbarit.drm-play.com/epg_1.xml.gz"
+            "https://gabbarit.drm-play.com/epg_1.xml.gz"
           ls -lh epg/gabbarit.xml.gz
 
       - name: Commit and push
