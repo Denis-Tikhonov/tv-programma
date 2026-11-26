@@ -30,11 +30,51 @@ const UI = {
     document.getElementById('menu-overlay').classList.remove('open');
   },
 
+  setLoading(text, pct) {
+    document.getElementById('loading-text').textContent = text || 'Загрузка...';
+    const bar = document.getElementById('loading-bar');
+    const pctEl = document.getElementById('loading-pct');
+    if (typeof pct === 'number') {
+      bar.style.width = Math.max(0, Math.min(100, pct)) + '%';
+      pctEl.textContent = Math.round(pct) + '%';
+    } else {
+      bar.style.width = '0%';
+      pctEl.textContent = '';
+    }
+  },
+
+  showLoading(text, pct) {
+    this.setLoading(text, pct);
+    document.getElementById('loading').classList.remove('hidden');
+  },
+
+  hideLoading() {
+    document.getElementById('loading').classList.add('hidden');
+    this.setLoading('', 0);
+  },
+
+  async updateStorageInfo() {
+    const el = document.getElementById('storage-info');
+    if (!el) return;
+    try {
+      const stats = await DB.countStats();
+      let mem = '';
+      if (navigator.storage && navigator.storage.estimate) {
+        const est = await navigator.storage.estimate();
+        const used = est.usage || 0;
+        const q = est.quota || 0;
+        mem = ` · ~${(used / 1048576).toFixed(1)} МБ`;
+        if (q) mem += ` / ${(q / 1048576).toFixed(0)} МБ`;
+      }
+      el.textContent = `В базе: ${stats.channels} кан., ${stats.programmes} пер.${mem}`;
+    } catch {
+      el.textContent = 'Память: нет данных';
+    }
+  },
+
   renderSources(presets, savedSources, activeId) {
     const container = document.getElementById('sources-list');
     const all = [...presets];
-
-    // merge saved custom
     savedSources.forEach(s => {
       if (!all.find(p => p.id === s.id)) all.push(s);
     });
@@ -47,22 +87,34 @@ const UI = {
         ? `Загружено: ${Utils.formatDate(loaded)} · ${s.channelCount || 0} каналов`
         : 'Не загружен';
 
+      const renameBtn = !s.isPreset
+        ? `<button class="btn-rename" data-id="${s.id}" title="Переименовать">✎</button>`
+        : '';
+
+      // Order: Load/Update first, then Select/Channels
+      let actions = '';
+      if (!loaded) {
+        actions = `<button class="btn primary btn-reload" data-id="${s.id}">Загрузить</button>`;
+      } else if (isActive) {
+        actions = `
+          <button class="btn btn-reload" data-id="${s.id}">Обновить</button>
+          <button class="btn primary btn-open-channels" data-id="${s.id}">Каналы</button>`;
+      } else {
+        actions = `
+          <button class="btn btn-reload" data-id="${s.id}">Обновить</button>
+          <button class="btn primary btn-activate" data-id="${s.id}">Выбрать</button>`;
+      }
+
       return `
         <div class="source-card ${isActive ? 'active' : ''}" data-id="${s.id}">
           <div class="top">
             <div>
-              <div class="name">${Utils.escapeHtml(s.name)}</div>
+              <div class="name">${Utils.escapeHtml(s.name)} ${renameBtn}</div>
               <div class="status">${statusText}</div>
               ${loaded ? `<div class="fresh"><span class="dot ${fresh.cls}"></span> ${fresh.text}</div>` : ''}
             </div>
           </div>
-          <div class="actions">
-            ${isActive
-              ? `<button class="btn primary btn-open-channels" data-id="${s.id}">Каналы</button>`
-              : `<button class="btn btn-activate" data-id="${s.id}">Выбрать</button>`
-            }
-            <button class="btn btn-reload" data-id="${s.id}">${loaded ? 'Обновить' : 'Загрузить'}</button>
-          </div>
+          <div class="actions">${actions}</div>
         </div>
       `;
     }).join('');
@@ -70,7 +122,7 @@ const UI = {
 
   renderChannels(channels, favorites, filter = '', favOnly = false) {
     const list = document.getElementById('channels-list');
-    let items = channels;
+    let items = channels.slice();
     if (favOnly) items = items.filter(c => favorites.has(c.id));
     if (filter) {
       const q = filter.toLowerCase();
@@ -121,18 +173,15 @@ const UI = {
 
     const list = document.getElementById('programmes-list');
     const now = Date.now();
-    let nowIndex = -1;
 
-    list.innerHTML = programmes.map((p, i) => {
+    list.innerHTML = programmes.map(p => {
       const day = Utils.dayClass(p.start);
       const isNow = p.start <= now && p.stop > now;
-      if (isNow) nowIndex = i;
-      const badge = Utils.formatDayLabel(p.start);
       return `
         <div class="prog-card day-${day} ${isNow ? 'now' : ''}" data-start="${p.start}">
           <div class="time">
             ${Utils.formatTime(p.start)} – ${Utils.formatTime(p.stop)}
-            <span class="badge ${day}">${badge}</span>
+            <span class="badge ${day}">${Utils.formatDayLabel(p.start)}</span>
           </div>
           <div class="title">${Utils.escapeHtml(p.title)}</div>
           ${p.desc ? `<div class="desc">${Utils.escapeHtml(p.desc)}</div>` : ''}
@@ -141,12 +190,9 @@ const UI = {
       `;
     }).join('');
 
-    // scroll to current
     requestAnimationFrame(() => {
-      const target = list.querySelector('.prog-card.now') || list.querySelector(`[data-start]`);
-      if (target) {
-        target.scrollIntoView({ block: 'center', behavior: 'auto' });
-      }
+      const target = list.querySelector('.prog-card.now');
+      if (target) target.scrollIntoView({ block: 'center', behavior: 'auto' });
     });
   },
 
@@ -177,10 +223,7 @@ const UI = {
 
   renderSearchHistory(history) {
     const el = document.getElementById('search-history');
-    if (!history.length) {
-      el.innerHTML = '';
-      return;
-    }
+    if (!history.length) { el.innerHTML = ''; return; }
     el.innerHTML = history.map(q =>
       `<button type="button" data-q="${Utils.escapeHtml(q)}">${Utils.escapeHtml(q)}</button>`
     ).join('');

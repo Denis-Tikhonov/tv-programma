@@ -1,4 +1,4 @@
-const CACHE = 'tv-programma-v1.1.1';
+const CACHE = 'tv-programma-v1.2.0';
 const ASSETS = [
   './',
   './index.html',
@@ -27,8 +27,12 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
-  // Don't cache EPG files or external
-  if (url.pathname.includes('/epg/') || url.hostname !== location.hostname) {
+  // Never cache EPG archives — always network
+  if (url.pathname.includes('/epg/') || url.pathname.endsWith('.xml.gz') || url.pathname.endsWith('.xml')) {
+    e.respondWith(fetch(e.request));
+    return;
+  }
+  if (url.hostname !== self.location.hostname) {
     return;
   }
   e.respondWith(

@@ -194,6 +194,69 @@ const DB = {
     });
   },
 
+  
+  async replaceSourceData(sourceId, channels, programmes) {
+    const db = await this.open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(['channels', 'programmes'], 'readwrite');
+      const chStore = tx.objectStore('channels');
+      const prStore = tx.objectStore('programmes');
+
+      // remove old channels of this source
+      const idx = chStore.index('sourceId');
+      const req = idx.openCursor(IDBKeyRange.only(sourceId));
+      req.onsuccess = (e) => {
+        const cursor = e.target.result;
+        if (cursor) {
+          cursor.delete();
+          cursor.continue();
+        } else {
+          // clear all programmes (single active source model)
+          prStore.clear();
+          channels.forEach(c => chStore.put(c));
+          programmes.forEach(p => prStore.put(p));
+        }
+      };
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  },
+
+  async clearEpgData() {
+    const db = await this.open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(['channels', 'programmes', 'sources', 'meta'], 'readwrite');
+      tx.objectStore('channels').clear();
+      tx.objectStore('programmes').clear();
+      // keep favorites, search history, url history — only clear source load info
+      const src = tx.objectStore('sources');
+      const getAll = src.getAll();
+      getAll.onsuccess = () => {
+        (getAll.result || []).forEach(s => {
+          s.loadedAt = null;
+          s.channelCount = 0;
+          s.programmeCount = 0;
+          src.put(s);
+        });
+      };
+      tx.objectStore('meta').delete('activeSourceId');
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  },
+
+  async countStats() {
+    const db = await this.open();
+    return new Promise((resolve) => {
+      const tx = db.transaction(['channels', 'programmes'], 'readonly');
+      let channels = 0, programmes = 0;
+      tx.objectStore('channels').count().onsuccess = (e) => { channels = e.target.result; };
+      tx.objectStore('programmes').count().onsuccess = (e) => { programmes = e.target.result; };
+      tx.oncomplete = () => resolve({ channels, programmes });
+      tx.onerror = () => resolve({ channels: 0, programmes: 0 });
+    });
+  },
+
   async toggleFavorite(channelId) {
     const db = await this.open();
     return new Promise((resolve, reject) => {

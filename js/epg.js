@@ -1,32 +1,68 @@
 const EPG = {
-  /**
-   * Parse XMLTV and filter by day range.
-   * days: 1 = today, 3 = yesterday+today+tomorrow, 7 = wider
-   */
   async loadAndParse(url, days = 3, onProgress) {
-    if (onProgress) onProgress('Скачивание...');
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const buf = await resp.arrayBuffer();
+    const report = (text, pct) => {
+      if (onProgress) onProgress(text, pct);
+    };
 
-    if (onProgress) onProgress('Распаковка...');
-    let xmlText;
-    const isGz = url.endsWith('.gz') || (buf.byteLength > 2 && new Uint8Array(buf)[0] === 0x1f && new Uint8Array(buf)[1] === 0x8b);
-    if (isGz) {
-      if (typeof DecompressionStream !== 'undefined') {
-        const ds = new DecompressionStream('gzip');
-        const stream = new Response(buf).body.pipeThrough(ds);
-        xmlText = await new Response(stream).text();
-      } else {
-        // fallback: try pako if available, else fail
-        throw new Error('Браузер не поддерживает распаковку gzip. Обновите браузер.');
+    report('Скачивание...', 0);
+
+    // cache-bust so update always gets fresh file
+    const fetchUrl = url + (url.includes('?') ? '&' : '?') + '_t=' + Date.now();
+    const resp = await fetch(fetchUrl, { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} — файл недоступен`);
+
+    const total = Number(resp.headers.get('Content-Length')) || 0;
+    let buf;
+
+    if (resp.body && typeof resp.body.getReader === 'function' && total > 0) {
+      const reader = resp.body.getReader();
+      const chunks = [];
+      let received = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        received += value.length;
+        const pct = Math.min(90, Math.round((received / total) * 85));
+        report(`Скачивание... ${this._fmtSize(received)} / ${this._fmtSize(total)}`, pct);
       }
+      const merged = new Uint8Array(received);
+      let offset = 0;
+      for (const c of chunks) {
+        merged.set(c, offset);
+        offset += c.length;
+      }
+      buf = merged.buffer;
+    } else {
+      buf = await resp.arrayBuffer();
+      report('Скачивание завершено', 85);
+    }
+
+    report('Распаковка...', 88);
+    let xmlText;
+    const u8 = new Uint8Array(buf);
+    const isGz = url.includes('.gz') || (u8.length > 2 && u8[0] === 0x1f && u8[1] === 0x8b);
+    if (isGz) {
+      if (typeof DecompressionStream === 'undefined') {
+        throw new Error('Браузер не поддерживает gzip. Обновите Chrome / Safari.');
+      }
+      const ds = new DecompressionStream('gzip');
+      const stream = new Response(buf).body.pipeThrough(ds);
+      xmlText = await new Response(stream).text();
     } else {
       xmlText = new TextDecoder().decode(buf);
     }
 
-    if (onProgress) onProgress('Разбор XML...');
-    return this.parseXml(xmlText, days);
+    report('Разбор XML...', 93);
+    const result = this.parseXml(xmlText, days);
+    report('Сохранение...', 97);
+    return result;
+  },
+
+  _fmtSize(n) {
+    if (n < 1024) return n + ' Б';
+    if (n < 1048576) return (n / 1024).toFixed(0) + ' КБ';
+    return (n / 1048576).toFixed(1) + ' МБ';
   },
 
   parseXml(xmlText, days) {
@@ -47,7 +83,6 @@ const EPG = {
       rangeStart = startOfToday - 86400000;
       rangeEnd = startOfToday + 2 * 86400000;
     } else {
-      // 7 days: -2 .. +4
       rangeStart = startOfToday - 2 * 86400000;
       rangeEnd = startOfToday + 5 * 86400000;
     }
@@ -108,7 +143,6 @@ const EPG = {
   },
 
   parseXmlTime(str) {
-    // YYYYMMDDHHmmss +ZZZZ or without
     const m = str.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\s*([+-]\d{4})?/);
     if (!m) return 0;
     const [, y, mo, d, h, mi, s, tz] = m;
