@@ -173,12 +173,15 @@ const UI = {
   },
 
   renderProgrammes(programmes, channelName) {
+    // title in app header
+    document.getElementById('header-title').textContent =
+      'Программа · ' + (channelName || '');
+
     const header = document.getElementById('programmes-header');
     header.innerHTML = `
       <div class="ph-top">
-        <button type="button" class="btn small ph-back" id="btn-back-channels">← Каналы</button>
+        <button type="button" class="btn small ph-back" id="btn-back-channels" aria-label="Назад">←</button>
         <div class="ph-titles">
-          <div class="ch-name">Программа · ${Utils.escapeHtml(channelName)}</div>
           <div class="ch-meta">${programmes.length} передач</div>
         </div>
       </div>
