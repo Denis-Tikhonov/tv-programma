@@ -598,3 +598,14 @@ html, body {
   flex: 1;
   min-width: 0;
 }
+
+.storage-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.storage-bar {
+  flex-wrap: wrap;
+}

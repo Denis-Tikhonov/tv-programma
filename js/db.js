@@ -222,13 +222,25 @@ const DB = {
     });
   },
 
+  _txClear(storeName) {
+    return this.open().then(db => new Promise((resolve, reject) => {
+      const tx = db.transaction([storeName], 'readwrite');
+      tx.objectStore(storeName).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('abort ' + storeName));
+    }));
+  },
+
+  /** Clear channels + programmes only; keep favorites and source list entries */
   async clearEpgData() {
+    // Separate transactions: huge programmes.clear() must fully commit
+    await this._txClear('programmes');
+    await this._txClear('channels');
+
     const db = await this.open();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(['channels', 'programmes', 'sources', 'meta'], 'readwrite');
-      tx.objectStore('channels').clear();
-      tx.objectStore('programmes').clear();
-      // keep favorites, search history, url history — only clear source load info
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(['sources', 'meta'], 'readwrite');
       const src = tx.objectStore('sources');
       const getAll = src.getAll();
       getAll.onsuccess = () => {
@@ -242,6 +254,23 @@ const DB = {
       tx.objectStore('meta').delete('activeSourceId');
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
+    });
+  },
+
+  /** Emergency: wipe entire IndexedDB database */
+  async deleteDatabase() {
+    if (this._db) {
+      try { this._db.close(); } catch (_) {}
+      this._db = null;
+    }
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.deleteDatabase(this.NAME);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+      req.onblocked = () => {
+        // another tab holds connection — wait a bit
+        setTimeout(() => resolve(), 1500);
+      };
     });
   },
 

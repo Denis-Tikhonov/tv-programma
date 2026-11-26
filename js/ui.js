@@ -3,7 +3,7 @@ const UI = {
   favoritesOnly: false,
   channelFilter: '',
 
-  showView(name) {
+  showView(name, titleOverride) {
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     const el = document.getElementById('view-' + name);
     if (el) el.classList.add('active');
@@ -17,7 +17,8 @@ const UI = {
       sources: 'Источники EPG',
       'source-channels': 'Каналы источника'
     };
-    document.getElementById('header-title').textContent = titles[name] || 'ТВ программа';
+    document.getElementById('header-title').textContent =
+      titleOverride || titles[name] || 'ТВ программа';
   },
 
   openMenu() {
@@ -173,16 +174,29 @@ const UI = {
   },
 
   renderProgrammes(programmes, channelName) {
-    // title in app header
-    document.getElementById('header-title').textContent =
-      'Программа · ' + (channelName || '');
+    // period from min/max start
+    let period = '';
+    if (programmes.length) {
+      let mn = programmes[0].start, mx = programmes[0].start;
+      for (const p of programmes) {
+        if (p.start < mn) mn = p.start;
+        if (p.start > mx) mx = p.start;
+      }
+      const a = Utils.formatDate(mn).slice(0, 10);
+      const b = Utils.formatDate(mx).slice(0, 10);
+      period = a === b ? a : (a + ' – ' + b);
+    }
+
+    const meta = programmes.length
+      ? (programmes.length + ' передач' + (period ? ' · ' + period : ''))
+      : 'Нет передач';
 
     const header = document.getElementById('programmes-header');
     header.innerHTML = `
       <div class="ph-top">
         <button type="button" class="btn small ph-back" id="btn-back-channels" aria-label="Назад">←</button>
         <div class="ph-titles">
-          <div class="ch-meta">${programmes.length} передач</div>
+          <div class="ch-meta">${meta}</div>
         </div>
       </div>
     `;

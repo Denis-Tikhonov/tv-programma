@@ -1,9 +1,9 @@
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.4.2';
 
 const PRESET_SOURCES = [
   {
     id: 'preset-merged',
-    name: 'Сводка (1lot + gabbarit)',
+    name: 'Основной (1lot + gabbarit)',
     url: './epg/merged.xml.gz',
     isPreset: true
   },
@@ -28,6 +28,7 @@ const App = {
   searchHistory: [],
   urlHistory: [],
   _renameId: null,
+  isLoading: false,
   channelsReturnState: { favOnly: false, filter: '' },
   progCounts: new Map(),
 
@@ -176,6 +177,7 @@ const App = {
 
     document.getElementById('btn-add-source').onclick = () => this.addCustomSource();
     document.getElementById('btn-clear-epg').onclick = () => this.clearEpg();
+    document.getElementById('btn-clear-cache').onclick = () => this.clearCache();
 
     document.getElementById('btn-do-search').onclick = () => this.doSearch();
     document.getElementById('search-input').onkeydown = (e) => {
@@ -242,6 +244,11 @@ const App = {
   },
 
   async loadSource(id) {
+    if (this.isLoading) {
+      Utils.toast('Дождитесь окончания текущей загрузки');
+      return;
+    }
+
     let source = PRESET_SOURCES.find(p => p.id === id) || await DB.getSource(id);
     if (!source) {
       Utils.toast('Источник не найден');
@@ -251,6 +258,7 @@ const App = {
     const daysEl = document.querySelector('input[name="days"]:checked');
     const days = daysEl ? parseInt(daysEl.value, 10) : 3;
 
+    this.isLoading = true;
     UI.showLoading('Скачивание...', 0);
     try {
       const data = await EPG.loadAndParse(source.url, days, (text, pct) => {
@@ -259,7 +267,8 @@ const App = {
 
       UI.setLoading('Сохранение в базу...', 98);
       const channels = data.channels.map(c => ({ ...c, sourceId: id }));
-      await DB.replaceSourceData(id, channels, data.programmes);
+      const programmes = data.programmes;
+      await DB.replaceSourceData(id, channels, programmes);
 
       const saved = {
         id,
@@ -286,6 +295,8 @@ const App = {
       UI.hideLoading();
       console.error(err);
       Utils.toast('Ошибка: ' + (err.message || 'не удалось загрузить'));
+    } finally {
+      this.isLoading = false;
     }
   },
 
@@ -346,19 +357,70 @@ const App = {
   },
 
   async clearEpg() {
-    if (!confirm('Очистить каналы и передачи?\nИзбранное и история поиска сохранятся.')) return;
-    UI.showLoading('Очистка...', 50);
+    if (this.isLoading) {
+      Utils.toast('Дождитесь окончания загрузки');
+      return;
+    }
+    if (!confirm('Очистить каналы и передачи из базы?\nИзбранное и история поиска сохранятся.')) return;
+    UI.showLoading('Очистка EPG...', 30);
     try {
+      UI.setLoading('Очистка передач...', 40);
       await DB.clearEpgData();
       this.activeSourceId = null;
       this.channels = [];
+      this.progCounts = new Map();
       UI.hideLoading();
       Utils.toast('EPG очищен');
       UI.showView('home');
       this.renderSourcesList();
     } catch (e) {
+      console.error(e);
       UI.hideLoading();
-      Utils.toast('Ошибка очистки');
+      Utils.toast('Ошибка очистки EPG: ' + (e && e.message ? e.message : 'сбой'));
+    }
+  },
+
+  async clearCache() {
+    if (this.isLoading) {
+      Utils.toast('Дождитесь окончания загрузки');
+      return;
+    }
+    if (!confirm(
+      'АВАРИЙНЫЙ СБРОС\n\n' +
+      'Будет удалена вся база IndexedDB (EPG, избранное, истории, источники)\n' +
+      'и кэш приложения.\n\n' +
+      'Страница перезагрузится.'
+    )) return;
+
+    UI.showLoading('Сброс базы...', 20);
+    try {
+      UI.setLoading('Удаление IndexedDB...', 50);
+      await DB.deleteDatabase();
+
+      UI.setLoading('Очистка кэша SW...', 80);
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+      }
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map(r => r.unregister()));
+      }
+
+      this.activeSourceId = null;
+      this.channels = [];
+      this.progCounts = new Map();
+      this.favorites = new Set();
+      this.searchHistory = [];
+      this.urlHistory = [];
+
+      UI.hideLoading();
+      Utils.toast('База сброшена — перезагрузка…');
+      setTimeout(() => location.reload(), 600);
+    } catch (e) {
+      console.error(e);
+      UI.hideLoading();
+      Utils.toast('Ошибка сброса: ' + (e && e.message ? e.message : 'сбой'));
     }
   },
 
@@ -373,8 +435,9 @@ const App = {
     try {
       const programmes = await DB.getProgrammesByChannel(channelId);
       UI.hideLoading();
+      // showView AFTER title with channel — must not overwrite header
+      UI.showView('programmes', 'Программа · ' + name);
       UI.renderProgrammes(programmes, name);
-      UI.showView('programmes');
     } catch (e) {
       UI.hideLoading();
       Utils.toast('Ошибка загрузки программы');
