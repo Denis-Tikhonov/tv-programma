@@ -74,10 +74,9 @@ const UI = {
 
   renderSources(presets, savedSources, activeId) {
     const container = document.getElementById('sources-list');
-    const all = [...presets];
-    savedSources.forEach(s => {
-      if (!all.find(p => p.id === s.id)) all.push(s);
-    });
+    // presets first, then custom
+    const customs = savedSources.filter(s => !s.isPreset && !presets.find(p => p.id === s.id));
+    const all = [...presets, ...customs];
 
     container.innerHTML = all.map(s => {
       const isActive = s.id === activeId;
@@ -90,8 +89,9 @@ const UI = {
       const renameBtn = !s.isPreset
         ? `<button class="btn-rename" data-id="${s.id}" title="Переименовать">✎</button>`
         : '';
+      const removeTitle = s.isPreset ? 'Очистить из памяти' : 'Удалить источник';
+      const removeBtn = `<button class="btn-remove-source" data-id="${s.id}" title="${removeTitle}">✕</button>`;
 
-      // Order: Load/Update first, then Select/Channels
       let actions = '';
       if (!loaded) {
         actions = `<button class="btn primary btn-reload" data-id="${s.id}">Загрузить</button>`;
@@ -113,6 +113,7 @@ const UI = {
               <div class="status">${statusText}</div>
               ${loaded ? `<div class="fresh"><span class="dot ${fresh.cls}"></span> ${fresh.text}</div>` : ''}
             </div>
+            ${removeBtn}
           </div>
           <div class="actions">${actions}</div>
         </div>
@@ -120,7 +121,7 @@ const UI = {
     }).join('');
   },
 
-  renderChannels(channels, favorites, filter = '', favOnly = false) {
+  renderChannels(channels, favorites, filter = '', favOnly = false, progCounts = null) {
     const list = document.getElementById('channels-list');
     let items = channels.slice();
     if (favOnly) items = items.filter(c => favorites.has(c.id));
@@ -140,15 +141,22 @@ const UI = {
       return;
     }
 
-    list.innerHTML = items.map(c => `
+    const counts = progCounts || new Map();
+    list.innerHTML = items.map(c => {
+      const n = counts.get(c.id) || 0;
+      const ind = n > 0
+        ? `<span class="prog-ind" title="Есть программа">📅</span>`
+        : `<span class="prog-ind empty" title="Нет программы">—</span>`;
+      return `
       <div class="list-item" data-id="${c.id}">
         <img class="icon" src="${c.icon || ''}" alt="" onerror="this.style.display='none'">
         <div class="info">
           <div class="name">${Utils.escapeHtml(c.name)}</div>
         </div>
+        ${ind}
         <button class="fav ${favorites.has(c.id) ? 'active' : ''}" data-id="${c.id}">★</button>
-      </div>
-    `).join('');
+      </div>`;
+    }).join('');
   },
 
   renderSourceChannels(channels, sourceName) {
@@ -167,8 +175,13 @@ const UI = {
   renderProgrammes(programmes, channelName) {
     const header = document.getElementById('programmes-header');
     header.innerHTML = `
-      <div class="ch-name">${Utils.escapeHtml(channelName)}</div>
-      <div class="ch-meta">${programmes.length} передач</div>
+      <div class="ph-top">
+        <button type="button" class="btn small ph-back" id="btn-back-channels">← Каналы</button>
+        <div class="ph-titles">
+          <div class="ch-name">Программа · ${Utils.escapeHtml(channelName)}</div>
+          <div class="ch-meta">${programmes.length} передач</div>
+        </div>
+      </div>
     `;
 
     const list = document.getElementById('programmes-list');

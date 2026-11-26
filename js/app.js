@@ -1,4 +1,4 @@
-const APP_VERSION = '1.2.1';
+const APP_VERSION = '1.3.0';
 
 const PRESET_SOURCES = [
   {
@@ -22,6 +22,8 @@ const App = {
   searchHistory: [],
   urlHistory: [],
   _renameId: null,
+  channelsReturnState: { favOnly: false, filter: '' },
+  progCounts: new Map(),
 
   async init() {
     document.getElementById('app-version').textContent = 'v' + APP_VERSION;
@@ -37,9 +39,10 @@ const App = {
 
     if (this.activeSourceId) {
       this.channels = await DB.getChannels(this.activeSourceId);
+      this.progCounts = await DB.getChannelProgCounts();
       if (this.channels.length) {
         UI.showView('channels');
-        UI.renderChannels(this.channels, this.favorites);
+        this.showChannelsList();
       } else {
         UI.showView('home');
       }
@@ -60,8 +63,8 @@ const App = {
         UI.closeMenu();
         const view = li.dataset.view;
         if (view === 'channels') {
-          UI.showView('channels');
-          UI.renderChannels(this.channels, this.favorites, UI.channelFilter, UI.favoritesOnly);
+          UI.favoritesOnly = false;
+          this.showChannelsList();
         } else if (view === 'search') {
           UI.showView('search');
         } else if (view === 'sources') {
@@ -74,8 +77,7 @@ const App = {
     document.getElementById('menu-favorites').onclick = () => {
       UI.closeMenu();
       UI.favoritesOnly = true;
-      UI.showView('channels');
-      UI.renderChannels(this.channels, this.favorites, UI.channelFilter, true);
+      this.showChannelsList();
     };
 
     document.getElementById('btn-go-sources').onclick = () => {
@@ -90,13 +92,13 @@ const App = {
 
     document.getElementById('filter-channels').oninput = Utils.debounce((e) => {
       UI.channelFilter = e.target.value;
-      UI.renderChannels(this.channels, this.favorites, UI.channelFilter, UI.favoritesOnly);
+      this.showChannelsList(false);
     }, 200);
 
     document.getElementById('btn-fav-only').onclick = () => {
       UI.favoritesOnly = !UI.favoritesOnly;
       document.getElementById('btn-fav-only').textContent = UI.favoritesOnly ? '★ Все' : '★ Избранные';
-      UI.renderChannels(this.channels, this.favorites, UI.channelFilter, UI.favoritesOnly);
+      this.showChannelsList(false);
     };
 
     document.getElementById('channels-list').onclick = async (e) => {
@@ -107,7 +109,7 @@ const App = {
         const isFav = await DB.toggleFavorite(id);
         if (isFav) this.favorites.add(id);
         else this.favorites.delete(id);
-        UI.renderChannels(this.channels, this.favorites, UI.channelFilter, UI.favoritesOnly);
+        this.showChannelsList(false);
         return;
       }
       const item = e.target.closest('.list-item');
@@ -130,6 +132,12 @@ const App = {
         this.openRename(renameBtn.dataset.id);
         return;
       }
+      const removeBtn = e.target.closest('.btn-remove-source');
+      if (removeBtn) {
+        e.stopPropagation();
+        await this.removeSource(removeBtn.dataset.id);
+        return;
+      }
       const card = e.target.closest('.source-card');
       if (!card) return;
       const id = card.dataset.id;
@@ -147,6 +155,18 @@ const App = {
         return;
       }
     };
+
+    // back from programme to channels (delegated — header re-rendered)
+    document.getElementById('view-programmes').addEventListener('click', (e) => {
+      if (e.target.closest('#btn-back-channels')) {
+        UI.favoritesOnly = this.channelsReturnState.favOnly;
+        UI.channelFilter = this.channelsReturnState.filter || '';
+        const filterEl = document.getElementById('filter-channels');
+        if (filterEl) filterEl.value = UI.channelFilter;
+        document.getElementById('btn-fav-only').textContent = UI.favoritesOnly ? '★ Все' : '★ Избранные';
+        this.showChannelsList();
+      }
+    });
 
     document.getElementById('btn-add-source').onclick = () => this.addCustomSource();
     document.getElementById('btn-clear-epg').onclick = () => this.clearEpg();
@@ -209,8 +229,8 @@ const App = {
     this.activeSourceId = id;
     await DB.setMeta('activeSourceId', id);
     this.channels = await DB.getChannels(id);
-    UI.showView('channels');
-    UI.renderChannels(this.channels, this.favorites);
+    this.progCounts = await DB.getChannelProgCounts();
+    this.showChannelsList();
     Utils.toast('Источник выбран');
     this.renderSourcesList();
   },
@@ -250,11 +270,11 @@ const App = {
       this.activeSourceId = id;
       await DB.setMeta('activeSourceId', id);
       this.channels = channels;
+      this.progCounts = await DB.getChannelProgCounts();
 
       UI.hideLoading();
       Utils.toast(`Готово: ${data.stats.channels} каналов, ${data.stats.programmes} передач`);
-      UI.showView('channels');
-      UI.renderChannels(this.channels, this.favorites);
+      this.showChannelsList();
       this.renderSourcesList();
     } catch (err) {
       UI.hideLoading();
@@ -337,6 +357,10 @@ const App = {
   },
 
   async openChannel(channelId) {
+    this.channelsReturnState = {
+      favOnly: UI.favoritesOnly,
+      filter: UI.channelFilter || ''
+    };
     const ch = this.channels.find(c => c.id === channelId);
     const name = ch ? ch.name : channelId;
     UI.showLoading('Загрузка программы...', 30);
@@ -349,6 +373,57 @@ const App = {
       UI.hideLoading();
       Utils.toast('Ошибка загрузки программы');
     }
+  },
+
+  showChannelsList(switchView = true) {
+    if (switchView) UI.showView('channels');
+    UI.renderChannels(
+      this.channels,
+      this.favorites,
+      UI.channelFilter,
+      UI.favoritesOnly,
+      this.progCounts
+    );
+  },
+
+  async removeSource(id) {
+    const preset = PRESET_SOURCES.find(p => p.id === id);
+    const saved = await DB.getSource(id);
+    const isPreset = !!(preset || (saved && saved.isPreset));
+    const name = (saved && saved.name) || (preset && preset.name) || id;
+
+    if (isPreset) {
+      if (!confirm(`Очистить из памяти «${name}»?`)) return;
+      await DB.unloadSourceData(id);
+    } else {
+      if (!confirm(`Удалить источник «${name}»?`)) return;
+      await DB.deleteSource(id);
+    }
+
+    const wasActive = this.activeSourceId === id;
+    if (wasActive) {
+      this.activeSourceId = null;
+      this.channels = [];
+      this.progCounts = new Map();
+      await DB.setMeta('activeSourceId', null);
+
+      // focus another loaded source
+      const all = await DB.getSources();
+      const loaded = all.filter(s => s.loadedAt && s.id !== id);
+      // also presets may be in all after load
+      if (loaded.length) {
+        // prefer another preset if any
+        const next = loaded.find(s => s.isPreset) || loaded[0];
+        await this.activateSource(next.id);
+        Utils.toast(isPreset ? 'Очищено' : 'Удалено · переключено на другой источник');
+      } else {
+        UI.showView('home');
+        Utils.toast(isPreset ? 'Очищено' : 'Источник удалён');
+      }
+    } else {
+      Utils.toast(isPreset ? 'Очищено' : 'Источник удалён');
+    }
+    this.renderSourcesList();
   },
 
   async doSearch() {

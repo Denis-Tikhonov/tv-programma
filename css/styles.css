@@ -562,3 +562,39 @@ html, body {
   gap: 8px;
   justify-content: flex-end;
 }
+
+/* Channel prog indicator (minimal) */
+.prog-ind {
+  font-size: 14px;
+  width: 22px;
+  text-align: center;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+.prog-ind.empty {
+  opacity: 0.35;
+}
+
+.btn-remove-source {
+  background: none;
+  border: none;
+  color: var(--text2);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px 8px;
+  line-height: 1;
+}
+.btn-remove-source:active { color: #fca5a5; }
+
+.programmes-header .ph-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.programmes-header .ph-back {
+  flex-shrink: 0;
+}
+.programmes-header .ph-titles {
+  flex: 1;
+  min-width: 0;
+}

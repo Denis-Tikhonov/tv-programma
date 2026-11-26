@@ -257,6 +257,69 @@ const DB = {
     });
   },
 
+  
+  async unloadSourceData(sourceId) {
+    const db = await this.open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(['channels', 'programmes', 'sources'], 'readwrite');
+      const chStore = tx.objectStore('channels');
+      const prStore = tx.objectStore('programmes');
+      const srcStore = tx.objectStore('sources');
+      const idx = chStore.index('sourceId');
+      const req = idx.openCursor(IDBKeyRange.only(sourceId));
+      req.onsuccess = (e) => {
+        const cursor = e.target.result;
+        if (cursor) {
+          cursor.delete();
+          cursor.continue();
+        } else {
+          // single-active model: programmes belong to current load
+          prStore.clear();
+          const g = srcStore.get(sourceId);
+          g.onsuccess = () => {
+            const s = g.result;
+            if (s) {
+              s.loadedAt = null;
+              s.channelCount = 0;
+              s.programmeCount = 0;
+              srcStore.put(s);
+            }
+          };
+        }
+      };
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  },
+
+  async deleteSource(sourceId) {
+    await this.unloadSourceData(sourceId);
+    const db = await this.open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('sources', 'readwrite');
+      tx.objectStore('sources').delete(sourceId);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  },
+
+  /** Returns Map channelId -> programme count for current programmes store */
+  async getChannelProgCounts() {
+    const db = await this.open();
+    return new Promise((resolve) => {
+      const tx = db.transaction('programmes', 'readonly');
+      const req = tx.objectStore('programmes').getAll();
+      req.onsuccess = () => {
+        const map = new Map();
+        (req.result || []).forEach(p => {
+          map.set(p.channelId, (map.get(p.channelId) || 0) + 1);
+        });
+        resolve(map);
+      };
+      req.onerror = () => resolve(new Map());
+    });
+  },
+
   async toggleFavorite(channelId) {
     const db = await this.open();
     return new Promise((resolve, reject) => {
