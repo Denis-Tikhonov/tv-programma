@@ -1,4 +1,4 @@
-const CACHE = 'tv-programma-v1.2.0';
+const CACHE = 'tv-programma-v1.2.1';
 const ASSETS = [
   './',
   './index.html',
@@ -27,14 +27,23 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
-  // Never cache EPG archives — always network
-  if (url.pathname.includes('/epg/') || url.pathname.endsWith('.xml.gz') || url.pathname.endsWith('.xml')) {
-    e.respondWith(fetch(e.request));
+
+  // CRITICAL: do NOT intercept EPG archives at all.
+  // respondWith(fetch()) caused NS_BINDING_ABORTED / stream errors on large .gz files.
+  if (
+    url.pathname.includes('/epg/') ||
+    url.pathname.endsWith('.xml.gz') ||
+    url.pathname.endsWith('.xml') ||
+    url.search.includes('_t=')
+  ) {
+    return; // browser handles the request directly
+  }
+
+  // Only same-origin app shell
+  if (url.origin !== self.location.origin) {
     return;
   }
-  if (url.hostname !== self.location.hostname) {
-    return;
-  }
+
   e.respondWith(
     caches.match(e.request).then(r => r || fetch(e.request))
   );

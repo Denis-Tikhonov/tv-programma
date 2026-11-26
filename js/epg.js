@@ -6,56 +6,97 @@ const EPG = {
 
     report('Скачивание...', 0);
 
-    // cache-bust so update always gets fresh file
-    const fetchUrl = url + (url.includes('?') ? '&' : '?') + '_t=' + Date.now();
-    const resp = await fetch(fetchUrl, { cache: 'no-store' });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status} — файл недоступен`);
+    // cache-bust; avoid SW/browser stale cache
+    const sep = url.includes('?') ? '&' : '?';
+    const fetchUrl = url + sep + '_t=' + Date.now();
+
+    let resp;
+    try {
+      resp = await fetch(fetchUrl, {
+        cache: 'no-store',
+        credentials: 'omit',
+        // mode default 'cors' is fine for same-origin and CORS-enabled hosts
+      });
+    } catch (e) {
+      throw new Error('Сеть: не удалось скачать файл. Проверьте интернет или размер архива.');
+    }
+
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status} — файл недоступен по адресу источника`);
+    }
 
     const total = Number(resp.headers.get('Content-Length')) || 0;
     let buf;
 
-    if (resp.body && typeof resp.body.getReader === 'function' && total > 0) {
-      const reader = resp.body.getReader();
-      const chunks = [];
-      let received = 0;
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        received += value.length;
-        const pct = Math.min(90, Math.round((received / total) * 85));
-        report(`Скачивание... ${this._fmtSize(received)} / ${this._fmtSize(total)}`, pct);
+    try {
+      if (resp.body && typeof resp.body.getReader === 'function' && total > 0) {
+        const reader = resp.body.getReader();
+        const chunks = [];
+        let received = 0;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          received += value.length;
+          const pct = Math.min(88, Math.round((received / total) * 85));
+          report(`Скачивание... ${this._fmtSize(received)} / ${this._fmtSize(total)}`, pct);
+        }
+        const merged = new Uint8Array(received);
+        let offset = 0;
+        for (const c of chunks) {
+          merged.set(c, offset);
+          offset += c.length;
+        }
+        buf = merged.buffer;
+        if (total && received < total * 0.99) {
+          throw new Error('Скачивание прервалось (неполный файл). Повторите.');
+        }
+      } else {
+        buf = await resp.arrayBuffer();
+        report('Скачивание завершено', 85);
       }
-      const merged = new Uint8Array(received);
-      let offset = 0;
-      for (const c of chunks) {
-        merged.set(c, offset);
-        offset += c.length;
-      }
-      buf = merged.buffer;
-    } else {
-      buf = await resp.arrayBuffer();
-      report('Скачивание завершено', 85);
+    } catch (e) {
+      if (e.message && e.message.includes('прервалось')) throw e;
+      throw new Error('Скачивание прервано. Для больших файлов (gabbarit ~100 МБ) нужен стабильный интернет.');
     }
 
-    report('Распаковка...', 88);
-    let xmlText;
     const u8 = new Uint8Array(buf);
-    const isGz = url.includes('.gz') || (u8.length > 2 && u8[0] === 0x1f && u8[1] === 0x8b);
+    if (u8.length < 100) {
+      throw new Error('Файл слишком маленький — возможно, это страница ошибки, а не EPG.');
+    }
+
+    report('Распаковка...', 90);
+    let xmlText;
+    const isGz =
+      url.includes('.gz') ||
+      (u8.length > 2 && u8[0] === 0x1f && u8[1] === 0x8b);
+
     if (isGz) {
       if (typeof DecompressionStream === 'undefined') {
-        throw new Error('Браузер не поддерживает gzip. Обновите Chrome / Safari.');
+        throw new Error('Браузер не поддерживает gzip. Обновите Chrome / Firefox / Safari.');
       }
-      const ds = new DecompressionStream('gzip');
-      const stream = new Response(buf).body.pipeThrough(ds);
-      xmlText = await new Response(stream).text();
+      try {
+        const ds = new DecompressionStream('gzip');
+        const stream = new Response(buf).body.pipeThrough(ds);
+        xmlText = await new Response(stream).text();
+      } catch (e) {
+        // Classic "Error in input stream" when body is not valid gzip or truncated
+        throw new Error(
+          'Ошибка распаковки gzip (повреждённый или неполный архив). ' +
+          'Нажмите «Очистить EPG» и загрузите снова. Если это gabbarit — подождите и повторите: файл ~100 МБ.'
+        );
+      }
     } else {
       xmlText = new TextDecoder().decode(buf);
     }
 
-    report('Разбор XML...', 93);
+    if (!xmlText || xmlText.length < 100 || !xmlText.includes('<tv')) {
+      throw new Error('После распаковки нет данных XMLTV. Проверьте файл источника.');
+    }
+
+    report('Разбор XML...', 94);
     const result = this.parseXml(xmlText, days);
-    report('Сохранение...', 97);
+    report('Сохранение...', 98);
     return result;
   },
 
