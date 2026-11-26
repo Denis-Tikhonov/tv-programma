@@ -39,16 +39,22 @@ jobs:
             "https://gabbarit.drm-play.com/epg_1.xml.gz"
           ls -lh epg/gabbarit.xml.gz
 
+      - name: Merge EPG (1lot priority, 7 days → fallback 3)
+        run: |
+          python3 scripts/merge_epg.py epg/1lot.xml.gz epg/gabbarit.xml.gz epg/merged.xml.gz
+          ls -lh epg/
+          cat epg/merged.meta.txt || true
+
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          git add epg/
+          git add epg/ scripts/merge_epg.py
           
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "chore: update EPG $(date -u +%Y-%m-%d)"
+            git commit -m "chore: update EPG merged $(date -u +%Y-%m-%d)"
             git push
           fi

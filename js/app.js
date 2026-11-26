@@ -1,15 +1,21 @@
-const APP_VERSION = '1.3.1';
+const APP_VERSION = '1.4.0';
 
 const PRESET_SOURCES = [
   {
+    id: 'preset-merged',
+    name: 'Сводка (1lot + gabbarit)',
+    url: './epg/merged.xml.gz',
+    isPreset: true
+  },
+  {
     id: 'preset-1lot',
-    name: '1lot.tv (основной)',
+    name: '1lot.tv (сырой)',
     url: './epg/1lot.xml.gz',
     isPreset: true
   },
   {
     id: 'preset-gabbarit',
-    name: 'gabbarit (максимум каналов)',
+    name: 'gabbarit (сырой, тяжёлый)',
     url: './epg/gabbarit.xml.gz',
     isPreset: true
   }
