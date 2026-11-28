@@ -1,4 +1,4 @@
 days=3
-channels=6919
-programmes=618306
-size_bytes=53116353
+channels=6918
+programmes=619626
+size_bytes=53162588
