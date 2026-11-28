@@ -1,4 +1,4 @@
-const CACHE = 'tv-programma-v1.4.3';
+const CACHE = 'tv-programma-v1.4.4';
 const ASSETS = [
   './',
   './index.html',

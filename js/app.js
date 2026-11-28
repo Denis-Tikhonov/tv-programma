@@ -1,4 +1,4 @@
-const APP_VERSION = '1.4.3';
+const APP_VERSION = '1.4.4';
 
 const PRESET_SOURCES = [
   {
@@ -461,6 +461,18 @@ const App = {
     } catch (e) {
       UI.hideLoading();
       Utils.toast('Ошибка загрузки программы');
+    }
+  },
+
+  applyFontSize(mode) {
+    const appEl = document.getElementById('app');
+    const btn = document.getElementById('btn-font-size');
+    if (mode === 'large') {
+      appEl.classList.add('font-large');
+      if (btn) btn.textContent = 'Крупный';
+    } else {
+      appEl.classList.remove('font-large');
+      if (btn) btn.textContent = 'Обычный';
     }
   },
 
