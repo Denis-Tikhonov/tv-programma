@@ -1,4 +1,4 @@
-const APP_VERSION = '1.4.2';
+const APP_VERSION = '1.4.3';
 
 const PRESET_SOURCES = [
   {
@@ -43,6 +43,7 @@ const App = {
 
     UI.fillUrlHistory(this.urlHistory);
     UI.renderSearchHistory(this.searchHistory);
+    this.applyFontSize(localStorage.getItem('fontSize') || 'normal');
 
     if (this.activeSourceId) {
       this.channels = await DB.getChannels(this.activeSourceId);
@@ -85,6 +86,12 @@ const App = {
       UI.closeMenu();
       UI.favoritesOnly = true;
       this.showChannelsList();
+    };
+
+    document.getElementById('btn-font-size').onclick = () => {
+      const next = document.getElementById('app').classList.contains('font-large') ? 'normal' : 'large';
+      this.applyFontSize(next);
+      localStorage.setItem('fontSize', next);
     };
 
     document.getElementById('btn-go-sources').onclick = () => {
@@ -163,7 +170,7 @@ const App = {
       }
     };
 
-    // back from programme to channels (delegated — header re-rendered)
+    // programme view: back, now, accordion
     document.getElementById('view-programmes').addEventListener('click', (e) => {
       if (e.target.closest('#btn-back-channels')) {
         UI.favoritesOnly = this.channelsReturnState.favOnly;
@@ -172,6 +179,19 @@ const App = {
         if (filterEl) filterEl.value = UI.channelFilter;
         document.getElementById('btn-fav-only').textContent = UI.favoritesOnly ? '★ Все' : '★ Избранные';
         this.showChannelsList();
+        return;
+      }
+      if (e.target.closest('#btn-scroll-now')) {
+        UI.scrollToNow(true);
+        return;
+      }
+      const card = e.target.closest('.prog-card');
+      if (card && !e.target.closest('a')) {
+        const wasOpen = card.classList.contains('open');
+        document.querySelectorAll('#programmes-list .prog-card.open').forEach(c => {
+          if (c !== card) c.classList.remove('open');
+        });
+        card.classList.toggle('open', !wasOpen);
       }
     });
 

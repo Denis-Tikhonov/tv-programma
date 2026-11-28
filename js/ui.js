@@ -174,7 +174,6 @@ const UI = {
   },
 
   renderProgrammes(programmes, channelName) {
-    // period from min/max start
     let period = '';
     if (programmes.length) {
       let mn = programmes[0].start, mx = programmes[0].start;
@@ -198,6 +197,7 @@ const UI = {
         <div class="ph-titles">
           <div class="ch-meta">${meta}</div>
         </div>
+        <button type="button" class="btn small ph-now" id="btn-scroll-now">Сейчас</button>
       </div>
     `;
 
@@ -207,23 +207,49 @@ const UI = {
     list.innerHTML = programmes.map(p => {
       const day = Utils.dayClass(p.start);
       const isNow = p.start <= now && p.stop > now;
+      const openClass = isNow ? 'open' : '';
+      const details = [];
+      if (p.desc) details.push(`<div class="desc">${Utils.escapeHtml(p.desc)}</div>`);
+      if (p.category) details.push(`<span class="category">${Utils.escapeHtml(p.category)}</span>`);
+      const detailsHtml = details.length
+        ? `<div class="prog-details">${details.join('')}</div>`
+        : '';
       return `
-        <div class="prog-card day-${day} ${isNow ? 'now' : ''}" data-start="${p.start}">
-          <div class="time">
-            ${Utils.formatTime(p.start)} – ${Utils.formatTime(p.stop)}
-            <span class="badge ${day}">${Utils.formatDayLabel(p.start)}</span>
+        <div class="prog-card day-${day} ${isNow ? 'now' : ''} ${openClass}" data-start="${p.start}">
+          <div class="prog-summary">
+            <div class="time">
+              ${Utils.formatTime(p.start)} – ${Utils.formatTime(p.stop)}
+              <span class="badge ${day}">${Utils.formatDayLabel(p.start)}</span>
+            </div>
+            <div class="title">${Utils.escapeHtml(p.title)}</div>
           </div>
-          <div class="title">${Utils.escapeHtml(p.title)}</div>
-          ${p.desc ? `<div class="desc">${Utils.escapeHtml(p.desc)}</div>` : ''}
-          ${p.category ? `<span class="category">${Utils.escapeHtml(p.category)}</span>` : ''}
+          ${detailsHtml}
         </div>
       `;
     }).join('');
 
-    requestAnimationFrame(() => {
-      const target = list.querySelector('.prog-card.now');
-      if (target) target.scrollIntoView({ block: 'center', behavior: 'auto' });
-    });
+    requestAnimationFrame(() => this.scrollToNow(false));
+  },
+
+  scrollToNow(smooth) {
+    const list = document.getElementById('programmes-list');
+    if (!list) return;
+    let target = list.querySelector('.prog-card.now');
+    if (!target) {
+      const now = Date.now();
+      const cards = list.querySelectorAll('.prog-card[data-start]');
+      for (const c of cards) {
+        if (Number(c.dataset.start) >= now) {
+          target = c;
+          break;
+        }
+      }
+      if (!target && cards.length) target = cards[cards.length - 1];
+    }
+    if (!target) return;
+    list.querySelectorAll('.prog-card.open').forEach(c => c.classList.remove('open'));
+    target.classList.add('open');
+    target.scrollIntoView({ block: 'center', behavior: smooth ? 'smooth' : 'auto' });
   },
 
   renderSearchResults(results) {

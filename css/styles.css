@@ -609,3 +609,67 @@ html, body {
 .storage-bar {
   flex-wrap: wrap;
 }
+
+/* Font size */
+#app.font-large {
+  font-size: 17px;
+}
+#app.font-large .header h1 { font-size: 18px; }
+#app.font-large .list-item .name { font-size: 16px; }
+#app.font-large .prog-card .title { font-size: 17px; }
+#app.font-large .prog-card .desc { font-size: 15px; }
+#app.font-large .prog-card .time { font-size: 14px; }
+#app.font-large .ch-meta { font-size: 14px; }
+#app.font-large .source-card .name { font-size: 16px; }
+#app.font-large .btn { font-size: 15px; }
+#app.font-large .search-input-wrap input { font-size: 16px; }
+
+.side-menu-settings {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.programmes-header .ph-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.programmes-header .ph-titles {
+  flex: 1;
+  min-width: 0;
+}
+.programmes-header .ph-now {
+  flex-shrink: 0;
+}
+
+/* Accordion programme cards */
+.prog-card {
+  cursor: pointer;
+}
+.prog-card .prog-summary {
+  display: block;
+}
+.prog-card .prog-details {
+  display: none;
+  margin-top: 8px;
+}
+.prog-card.open .prog-details {
+  display: block;
+}
+.prog-card .title {
+  font-weight: 600;
+  font-size: 15px;
+}
+.prog-card .desc {
+  font-size: 13px;
+  color: var(--text2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
